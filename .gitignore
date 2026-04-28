@@ -1,0 +1,15 @@
+
+ Editor                                                                                                                                                                                                 
+  .vscode/
+  .idea/                                                                                                                                                                                                   
+  *.swp                                                     
+  .DS_Store
+
+  # Secrets — never committed                                                                                                                                                                              
+  *.secret.yaml
+  secrets/                                                                                                                                                                                                 
+  *-secret.yaml                                             
+                                                                                                                                                                                                           
+  # Local diagnostic dumps
+  diff-*.txt                                                                                                                                                                                               
+  debug-*.yaml 
