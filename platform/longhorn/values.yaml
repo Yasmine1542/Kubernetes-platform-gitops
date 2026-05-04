@@ -1,0 +1,15 @@
+defaultSettings:
+  defaultDataPath: /var/lib/longhorn
+  defaultReplicaCount: 3
+ingress:
+  annotations:
+    cert-manager.io/cluster-issuer: cluster-ca
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  enabled: true
+  host: longhorn.cluster.lan
+  ingressClassName: nginx
+  tls: true
+  tlsSecret: longhorn-tls
+persistence:
+  defaultClass: true
+  defaultClassReplicaCount: 3

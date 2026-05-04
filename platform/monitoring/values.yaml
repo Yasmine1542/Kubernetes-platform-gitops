@@ -1,0 +1,157 @@
+alertmanager:
+  alertmanagerSpec:
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+          - ReadWriteOnce
+          resources:
+            requests:
+              storage: 512Mi
+          storageClassName: longhorn
+  config:
+    inhibit_rules:
+    - equal:
+      - instance
+      source_matchers:
+      - severity = critical
+      - alertname = NodeHighMemory
+      target_matchers:
+      - severity = warning
+    - equal:
+      - job
+      - namespace
+      source_matchers:
+      - severity = critical
+      target_matchers:
+      - severity = warning
+    receivers:
+    - name: null-receiver
+    - name: webhook-critical
+      webhook_configs:
+      - send_resolved: true
+        url: http://alertmanager-webhook.monitoring.svc.cluster.local/critical
+    - name: webhook-warning
+      webhook_configs:
+      - send_resolved: true
+        url: http://alertmanager-webhook.monitoring.svc.cluster.local/warning
+    route:
+      group_by:
+      - alertname
+      - namespace
+      group_interval: 5m
+      group_wait: 30s
+      receiver: null-receiver
+      repeat_interval: 12h
+      routes:
+      - continue: false
+        group_wait: 10s
+        matchers:
+        - severity = critical
+        receiver: webhook-critical
+        repeat_interval: 1h
+      - continue: false
+        group_wait: 2m
+        matchers:
+        - severity = warning
+        receiver: webhook-warning
+        repeat_interval: 4h
+      - continue: false
+        matchers:
+        - severity = info
+        receiver: null-receiver
+  ingress:
+    annotations:
+      cert-manager.io/cluster-issuer: cluster-ca
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    enabled: true
+    hosts:
+    - alertmanager.cluster.lan
+    ingressClassName: nginx
+    pathType: Prefix
+    paths:
+    - /
+    tls:
+    - hosts:
+      - alertmanager.cluster.lan
+      secretName: alertmanager-tls
+grafana:
+  additionalDataSources:
+  - access: proxy
+    isDefault: false
+    name: Loki
+    type: loki
+    uid: loki
+    url: http://loki-gateway.monitoring.svc.cluster.local
+  admin:
+    existingSecret: grafana-admin-credentials
+    userKey: admin-user
+    passwordKey: admin-password
+  image:
+    tag: "12.0.2"
+  ingress:
+    annotations:
+      cert-manager.io/cluster-issuer: cluster-ca
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    enabled: true
+    hosts:
+    - grafana.cluster.lan
+    ingressClassName: nginx
+    path: /
+    pathType: Prefix
+    tls:
+    - hosts:
+      - grafana.cluster.lan
+      secretName: grafana-tls
+  initChownData:
+    enabled: false
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClassName: longhorn
+kubeControllerManager:
+  enabled: false
+kubeEtcd:
+  enabled: true
+  endpoints:
+  - 192.168.50.10
+  service:
+    enabled: true
+    port: 2381
+    targetPort: 2381
+kubeProxy:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeStateMetrics:
+  enabled: true
+nodeExporter:
+  enabled: false
+prometheus:
+  ingress:
+    annotations:
+      cert-manager.io/cluster-issuer: cluster-ca
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    enabled: true
+    hosts:
+    - prometheus.cluster.lan
+    ingressClassName: nginx
+    pathType: Prefix
+    paths:
+    - /
+    tls:
+    - hosts:
+      - prometheus.cluster.lan
+      secretName: prometheus-tls
+  prometheusSpec:
+    enableRemoteWriteReceiver: true
+    retention: 5d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+          - ReadWriteOnce
+          resources:
+            requests:
+              storage: 3Gi
+          storageClassName: longhorn
