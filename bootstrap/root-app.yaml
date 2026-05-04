@@ -8,7 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/Yasmine1542/Kubernetes-plaform-gitops.git
+    repoURL: https://github.com/Yasmine1542/Kubernetes-platform-gitops.git
     targetRevision: HEAD
     path: bootstrap/apps
   destination:

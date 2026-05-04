@@ -15,7 +15,7 @@ spec:
         releaseName: alloy
         valueFiles:
           - $values/platform/alloy/values.yaml
-    - repoURL: https://github.com/Yasmine1542/Kubernetes-plaform-gitops.git
+    - repoURL: https://github.com/Yasmine1542/Kubernetes-platform-gitops.git
       targetRevision: HEAD
       ref: values
   destination:
