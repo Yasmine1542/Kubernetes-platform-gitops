@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-load-script
+  namespace: sample-app
+data:
+  load.js: |
+    import http from 'k6/http';
+    import { sleep, check } from 'k6';
+
+    const TZ_OFFSET_H = 1;
+
+    const BASE_URL = 'http://sample-app-frontend.sample-app.svc.cluster.local';
+
+    const TITLES = [
+      'Fix login page bug', 'Update API documentation', 'Deploy to staging',
+      'Review pull request', 'Write unit tests', 'Optimise database queries',
+      'Set up monitoring alerts', 'Refactor auth module', 'Add input validation',
+      'Schedule team sync', 'Investigate memory leak', 'Update dependencies',
+      'Add integration tests', 'Document new endpoints', 'Clean up old logs',
+    ];
+
+    export const options = {
+      vus: 10,
+      duration: '720h',
+    };
+
+    function sleepMultiplier() {
+      const hour = (new Date().getUTCHours() + TZ_OFFSET_H) % 24;
+      if (hour >= 7  && hour < 9)  return 2.0;
+      if (hour >= 9  && hour < 18) return 1.0;
+      if (hour >= 18 && hour < 22) return 2.5;
+      return 6.0;
+    }
+
+    export default function () {
+      const rand = Math.random();
+
+      if (rand < 0.70) {
+        const res = http.get(`${BASE_URL}/api/tasks`);
+        check(res, { 'list 200': r => r.status === 200 });
+
+      } else if (rand < 0.90) {
+        const title = TITLES[Math.floor(Math.random() * TITLES.length)]
+                    + ' #' + Math.floor(Math.random() * 9999);
+        const res = http.post(
+          `${BASE_URL}/api/tasks`,
+          JSON.stringify({ title }),
+          { headers: { 'Content-Type': 'application/json' } }
+        );
+        check(res, { 'create 201': r => r.status === 201 });
+
+      } else {
+        const res = http.get(`${BASE_URL}/api/health`);
+        check(res, { 'health ok': r => r.status === 200 });
+      }
+
+      const base = 3 * sleepMultiplier();
+      sleep(base + Math.random() * base);
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k6-load-generator
+  namespace: sample-app
+  labels:
+    app: k6-load-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k6-load-generator
+  template:
+    metadata:
+      labels:
+        app: k6-load-generator
+    spec:
+      containers:
+        - name: k6
+          image: grafana/k6:latest
+          command:
+            - k6
+            - run
+          args:
+            - --out
+            - experimental-prometheus-rw
+            - /scripts/load.js
+          env:
+            - name: K6_PROMETHEUS_RW_SERVER_URL
+              value: http://prometheus-kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090/api/v1/write
+            - name: K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM
+              value: "true"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - mountPath: /scripts
+              name: script
+              readOnly: true
+      volumes:
+        - name: script
+          configMap:
+            name: k6-load-script

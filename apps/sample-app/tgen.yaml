@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sample-app-tgen-script
+  namespace: sample-app
+data:
+  tgen.py: |
+    #!/usr/bin/env python3
+    """
+    Traffic generator — continuously sends GET and POST requests to the API.
+    Runs as a Deployment so traffic is always flowing for Prometheus baseline
+    and Calico flow visibility.
+    """
+    import urllib.request
+    import json
+    import time
+    import random
+
+    API_URL = "http://sample-app-api.sample-app.svc.cluster.local:8000"
+
+    TASK_TITLES = [
+        "Review Kubernetes manifests",
+        "Update Grafana dashboards",
+        "Check Prometheus targets",
+        "Verify Loki log ingestion",
+        "Test Alertmanager routing",
+        "Analyze Calico flow data",
+        "Review network policies",
+        "Check storage utilization",
+        "Validate TLS certificates",
+        "Monitor pod resource usage",
+        "Inspect etcd health metrics",
+        "Audit RBAC permissions",
+        "Review Longhorn volume status",
+        "Update Ansible playbooks",
+        "Check node disk pressure",
+    ]
+
+    def get(path):
+        req = urllib.request.Request(f"{API_URL}{path}")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read())
+
+    def post(path, data):
+        body = json.dumps(data).encode()
+        req = urllib.request.Request(
+            f"{API_URL}{path}",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read())
+
+    cycle = 0
+    print("Traffic generator started", flush=True)
+
+    while True:
+        cycle += 1
+        try:
+            tasks = get("/api/tasks")
+
+            if cycle % 5 == 0:
+                title = random.choice(TASK_TITLES) + f" #{random.randint(1, 9999)}"
+                post("/api/tasks", {"title": title})
+                print(json.dumps({
+                    "cycle": cycle, "action": "created", "title": title,
+                    "total_tasks": len(tasks),
+                }), flush=True)
+            else:
+                print(json.dumps({
+                    "cycle": cycle, "action": "polled",
+                    "total_tasks": len(tasks),
+                }), flush=True)
+
+        except Exception as e:
+            print(json.dumps({"cycle": cycle, "error": str(e)}), flush=True)
+
+        time.sleep(3)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-app-tgen
+  namespace: sample-app
+  labels:
+    app.kubernetes.io/name: sample-app-tgen
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sample-app-tgen
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sample-app-tgen
+    spec:
+      containers:
+        - name: tgen
+          image: registry.access.redhat.com/ubi9/python-311:latest
+          command:
+            - python3
+            - /app/tgen.py
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          volumeMounts:
+            - name: script
+              mountPath: /app
+      volumes:
+        - name: script
+          configMap:
+            name: sample-app-tgen-script

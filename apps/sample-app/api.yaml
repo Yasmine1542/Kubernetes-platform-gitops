@@ -1,0 +1,268 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sample-app-api-script
+  namespace: sample-app
+data:
+  api.py: |
+    #!/usr/bin/env python3
+    """
+    Task Manager API
+    Endpoints: GET/POST /api/tasks, GET /api/health, GET /metrics
+    Connects to PostgreSQL, exposes Prometheus metrics.
+    """
+    import http.server
+    import json
+    import time
+    import os
+    import pg8000.dbapi
+    from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+
+    REQUEST_COUNT = Counter(
+        'http_requests_total', 'Total HTTP requests',
+        ['method', 'endpoint', 'status']
+    )
+    REQUEST_DURATION = Histogram(
+        'http_request_duration_seconds', 'HTTP request duration',
+        ['method', 'endpoint'],
+        buckets=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5]
+    )
+
+    DB_HOST = os.environ.get('DB_HOST', 'sample-app-postgres')
+    DB_PORT = int(os.environ.get('DB_PORT', '5432'))
+    DB_NAME = os.environ.get('DB_NAME', 'taskdb')
+    DB_USER = os.environ.get('DB_USER', 'taskuser')
+    DB_PASS = os.environ.get('DB_PASS', 'taskpassword')
+
+    def get_conn():
+        return pg8000.dbapi.connect(
+            host=DB_HOST, port=DB_PORT,
+            database=DB_NAME, user=DB_USER, password=DB_PASS
+        )
+
+    def init_db():
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS tasks (
+                id         SERIAL PRIMARY KEY,
+                title      TEXT NOT NULL,
+                done       BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+
+        def log_message(self, fmt, *args):
+            print(f"{self.address_string()} {fmt % args}", flush=True)
+
+        def send_json(self, code, data):
+            body = json.dumps(data).encode()
+            self.send_response(code)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_OPTIONS(self):
+            self.send_response(200)
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+            self.end_headers()
+
+        def do_GET(self):
+            start = time.time()
+            path = self.path.split('?')[0]
+
+            if path == '/api/health':
+                self.send_json(200, {
+                    'status': 'ok',
+                    'time': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                    'db_host': DB_HOST,
+                })
+                REQUEST_COUNT.labels('GET', '/api/health', '200').inc()
+
+            elif path == '/api/tasks':
+                try:
+                    conn = get_conn()
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT id, title, done, created_at FROM tasks ORDER BY id DESC LIMIT 50"
+                    )
+                    rows = cur.fetchall()
+                    cur.close()
+                    conn.close()
+                    tasks = [
+                        {'id': r[0], 'title': r[1], 'done': r[2], 'created_at': str(r[3])}
+                        for r in rows
+                    ]
+                    self.send_json(200, tasks)
+                    REQUEST_COUNT.labels('GET', '/api/tasks', '200').inc()
+                except Exception as e:
+                    self.send_json(500, {'error': str(e)})
+                    REQUEST_COUNT.labels('GET', '/api/tasks', '500').inc()
+
+            elif path == '/metrics':
+                body = generate_latest()
+                self.send_response(200)
+                self.send_header('Content-Type', CONTENT_TYPE_LATEST)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            else:
+                self.send_json(404, {'error': 'not found'})
+                REQUEST_COUNT.labels('GET', path, '404').inc()
+
+            REQUEST_DURATION.labels('GET', path).observe(time.time() - start)
+
+        def do_POST(self):
+            start = time.time()
+            path = self.path.split('?')[0]
+
+            if path == '/api/tasks':
+                try:
+                    length = int(self.headers.get('Content-Length', 0))
+                    body = json.loads(self.rfile.read(length)) if length else {}
+                    title = body.get('title', 'untitled')
+                    conn = get_conn()
+                    cur = conn.cursor()
+                    cur.execute("INSERT INTO tasks (title) VALUES (%s)", (title,))
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+                    self.send_json(201, {'status': 'created', 'title': title})
+                    REQUEST_COUNT.labels('POST', '/api/tasks', '201').inc()
+                except Exception as e:
+                    self.send_json(500, {'error': str(e)})
+                    REQUEST_COUNT.labels('POST', '/api/tasks', '500').inc()
+            else:
+                self.send_json(404, {'error': 'not found'})
+                REQUEST_COUNT.labels('POST', path, '404').inc()
+
+            REQUEST_DURATION.labels('POST', path).observe(time.time() - start)
+
+    if __name__ == '__main__':
+        print('Installing dependencies...', flush=True)
+        import subprocess, sys
+        subprocess.check_call(
+            [sys.executable, '-m', 'pip', 'install', '--quiet', 'pg8000', 'prometheus-client'],
+            stdout=subprocess.DEVNULL
+        )
+        import importlib
+        import pg8000.dbapi
+        importlib.reload(pg8000.dbapi)
+
+        print('Waiting for database...', flush=True)
+        for attempt in range(20):
+            try:
+                init_db()
+                print('Database ready.', flush=True)
+                break
+            except Exception as e:
+                print(f'DB not ready ({attempt + 1}/20): {e}', flush=True)
+                time.sleep(5)
+        else:
+            print('ERROR: could not connect to database after 20 attempts', flush=True)
+            raise SystemExit(1)
+
+        server = http.server.HTTPServer(('0.0.0.0', 8000), Handler)
+        print('API listening on :8000', flush=True)
+        server.serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-app-api
+  namespace: sample-app
+  labels:
+    app.kubernetes.io/name: sample-app-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sample-app-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sample-app-api
+    spec:
+      containers:
+        - name: api
+          image: registry.access.redhat.com/ubi9/python-311:latest
+          command:
+            - sh
+            - -c
+            - pip3 install --quiet pg8000 prometheus-client && python3 /app/api.py
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: DB_HOST
+              value: sample-app-postgres.sample-app.svc.cluster.local
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: sample-app-postgres-secret
+                  key: db
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: sample-app-postgres-secret
+                  key: user
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: sample-app-postgres-secret
+                  key: password
+          volumeMounts:
+            - name: script
+              mountPath: /app
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 40
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            failureThreshold: 4
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: script
+          configMap:
+            name: sample-app-api-script
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sample-app-api
+  namespace: sample-app
+  labels:
+    app.kubernetes.io/name: sample-app-api
+spec:
+  selector:
+    app.kubernetes.io/name: sample-app-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
