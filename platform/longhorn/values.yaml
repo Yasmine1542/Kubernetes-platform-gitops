@@ -1,6 +1,13 @@
 defaultSettings:
   defaultDataPath: /var/lib/longhorn
   defaultReplicaCount: 3
+csi:
+  # Single replica per CSI component — eliminates leader-election etcd write storm.
+  # On a single-master lab cluster 1 replica is identical in function to 3.
+  attacherReplicaCount: 1
+  provisionerReplicaCount: 1
+  resizerReplicaCount: 1
+  snapshotterReplicaCount: 1
 ingress:
   annotations:
     cert-manager.io/cluster-issuer: cluster-ca
