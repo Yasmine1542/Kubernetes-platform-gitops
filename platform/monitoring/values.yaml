@@ -1,5 +1,6 @@
 alertmanager:
   alertmanagerSpec:
+    priorityClassName: platform-monitoring
     storage:
       volumeClaimTemplate:
         spec:
@@ -76,6 +77,7 @@ alertmanager:
       - alertmanager.cluster.lan
       secretName: alertmanager-tls
 grafana:
+  priorityClassName: platform-monitoring
   additionalDataSources:
   - access: proxy
     isDefault: false
@@ -144,6 +146,7 @@ prometheus:
       - prometheus.cluster.lan
       secretName: prometheus-tls
   prometheusSpec:
+    priorityClassName: platform-monitoring
     enableRemoteWriteReceiver: true
     retention: 5d
     storageSpec:
