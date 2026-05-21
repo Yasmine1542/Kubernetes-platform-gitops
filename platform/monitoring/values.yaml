@@ -127,6 +127,12 @@ kubeScheduler:
   enabled: false
 kubeStateMetrics:
   enabled: true
+
+kube-state-metrics:
+  livenessProbe:
+    failureThreshold: 10
+  readinessProbe:
+    failureThreshold: 10
 nodeExporter:
   enabled: false
 prometheus:
