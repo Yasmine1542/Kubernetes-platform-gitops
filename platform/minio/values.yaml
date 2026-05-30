@@ -31,6 +31,8 @@ ingress:
     - minio-api.cluster.lan
     secretName: minio-api-tls
 mode: standalone
+deploymentUpdate:
+  type: Recreate
 persistence:
   enabled: true
   size: 4Gi

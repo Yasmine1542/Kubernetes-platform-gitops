@@ -78,6 +78,8 @@ alertmanager:
       secretName: alertmanager-tls
 grafana:
   priorityClassName: platform-monitoring
+  deploymentStrategy:
+    type: Recreate
   additionalDataSources:
   - access: proxy
     isDefault: false
