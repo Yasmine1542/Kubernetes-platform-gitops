@@ -1,46 +1,64 @@
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+
+  commonConfig:
+    replication_factor: 1
+
+  storage:
+    type: filesystem
+
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+  compactor:
+    working_directory: /var/loki/compactor
+    retention_enabled: true
+    retention_delete_delay: 2h
+    compaction_interval: 10m
+
+  limits_config:
+    retention_period: 96h
+
+singleBinary:
+  replicas: 1
+  priorityClassName: platform-monitoring
+
+  persistence:
+    enabled: true
+    storageClass: longhorn
+    size: 5Gi
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
 backend:
   replicas: 0
+read:
+  replicas: 0
+write:
+  replicas: 0
+
 chunksCache:
   enabled: false
-deploymentMode: SingleBinary
+
+resultsCache:
+  enabled: false
+
 gateway:
   enabled: true
   replicas: 1
   priorityClassName: platform-monitoring
-loki:
-  auth_enabled: false
-  commonConfig:
-    replication_factor: 1
-  limits_config:
-    retention_period: 168h
-  schemaConfig:
-    configs:
-    - from: "2024-01-01"
-      index:
-        period: 24h
-        prefix: loki_index_
-      object_store: filesystem
-      schema: v13
-      store: tsdb
-  storage:
-    type: filesystem
-read:
-  replicas: 0
-resultsCache:
-  enabled: false
-singleBinary:
-  priorityClassName: platform-monitoring
-  persistence:
-    enabled: true
-    size: 3Gi
-    storageClass: longhorn
-  replicas: 1
-  resources:
-    limits:
-      cpu: 500m
-      memory: 512Mi
-    requests:
-      cpu: 50m
-      memory: 128Mi
-write:
-  replicas: 0
