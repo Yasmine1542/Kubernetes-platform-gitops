@@ -1,0 +1,32 @@
+# NetGuard application — child of the app-of-apps root (bootstrap/root-app.yaml).
+# Points at the NetGuard repo's k8s/ manifests (workloads + inference Rollout +
+# canary AnalysisTemplate + ServiceMonitor). The netguard namespace holds only
+# GitOps-managed resources, so this is true CD.
+#
+# prune: false matches the platform convention here (ArgoCD won't delete objects
+# that leave Git). NOTE: the first sync replaces the inference Deployment with a
+# Rollout of the same name/selector — delete the old Deployment by hand once:
+#   kubectl -n netguard delete deploy inference
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: netguard
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Yasmine1542/NetGuard.git
+    targetRevision: main
+    path: k8s
+    directory:
+      recurse: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: netguard
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

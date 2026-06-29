@@ -1,6 +1,13 @@
 alertmanager:
   alertmanagerSpec:
     priorityClassName: platform-monitoring
+    # Mounts secret/aiops-webhook-token (key: token) at
+    # /etc/alertmanager/secrets/aiops-webhook-token/token so the aiops receiver
+    # can bearer-auth without the token living in Git. Create it once:
+    #   kubectl -n monitoring create secret generic aiops-webhook-token \
+    #     --from-literal=token=<same value as netguard-secrets AIOPS_WEBHOOK_TOKEN>
+    secrets:
+      - aiops-webhook-token
     storage:
       volumeClaimTemplate:
         spec:
@@ -36,6 +43,17 @@ alertmanager:
       webhook_configs:
       - send_resolved: true
         url: http://alertmanager-webhook.monitoring.svc.cluster.local/warning
+    # Triggers an AIOps diagnosis run in the netguard namespace. send_resolved is
+    # off so a recovery does not kick off a (costly) LLM pipeline; bearer token is
+    # read from the mounted secret file (see alertmanagerSpec.secrets above).
+    - name: aiops-webhook
+      webhook_configs:
+      - send_resolved: false
+        url: http://aiops-engine.netguard.svc.cluster.local:8000/api/aiops/webhook
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/secrets/aiops-webhook-token/token
     route:
       group_by:
       - alertname
@@ -45,6 +63,15 @@ alertmanager:
       receiver: null-receiver
       repeat_interval: 12h
       routes:
+      # Curated failure modes → AIOps diagnosis. continue:true so the alert ALSO
+      # falls through to the severity routes below (debug sink). Matching by
+      # alertname (not severity) gives precise control over what spends an LLM run.
+      - continue: true
+        receiver: aiops-webhook
+        group_wait: 30s
+        repeat_interval: 1h
+        matchers:
+        - alertname =~ "KubePodCrashLooping|KubePodNotReady|KubeContainerWaiting|KubeDeploymentReplicasMismatch|KubeStatefulSetReplicasMismatch|KubeNodeNotReady|KubePersistentVolumeErrors|KubePersistentVolumeFillingUp|TargetDown|PodEvicted"
       - continue: false
         group_wait: 10s
         matchers:
@@ -166,3 +193,20 @@ prometheus:
             requests:
               storage: 3Gi
           storageClassName: longhorn
+# Custom alert for pod eviction (no built-in alertname covers it). Routed to the
+# aiops-webhook via the alertname matcher above. Other failure modes
+# (CrashLooping, NotReady, PVC errors, TargetDown) come from the built-in
+# kube-prometheus-stack rules.
+additionalPrometheusRulesMap:
+  netguard-failure-modes:
+    groups:
+      - name: netguard.failuremodes
+        rules:
+          - alert: PodEvicted
+            expr: kube_pod_status_reason{reason="Evicted"} > 0
+            for: 1m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.pod }} in {{ $labels.namespace }} was evicted"
+              description: "{{ $labels.pod }} has reason=Evicted (node resource pressure)."
