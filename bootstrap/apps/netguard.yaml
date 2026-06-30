@@ -23,6 +23,17 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: netguard
+  # Argo CD injects apiVersion/kind into each volumeClaimTemplates entry when it
+  # diffs a StatefulSet, so postgres is permanently OutOfSync even though nothing
+  # real differs (kubectl diff is clean). Ignore those injected fields.
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      name: postgres
+      namespace: netguard
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[].apiVersion
+        - .spec.volumeClaimTemplates[].kind
   syncPolicy:
     automated:
       prune: false
